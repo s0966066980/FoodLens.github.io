@@ -26,6 +26,12 @@
                     <input type="password" id="api-key-input" placeholder="輸入你的 API Key..." autocomplete="off">
                     <button id="toggle-key-visibility" class="toggle-vis-btn" title="顯示/隱藏">👁️</button>
                 </div>
+                <label for="model-select">AI 模型</label>
+                <select id="model-select" class="model-select">
+                    <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite（推薦，免費額度最大）</option>
+                    <option value="gemini-2.5-flash">Gemini 2.5 Flash（較強，額度較小）</option>
+                    <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash Lite（備用）</option>
+                </select>
                 <p class="hint">
                     前往 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> 免費取得 API Key。
                     <br>Key 僅儲存在你的瀏覽器中，不會上傳至任何伺服器。
@@ -71,7 +77,7 @@
                         <img id="preview-image" alt="食物預覽">
                         <button id="remove-image" class="remove-btn" title="移除圖片">✕</button>
                     </div>
-                    <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
+                    <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" hidden>
                     <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
                 </div>
                 <button id="analyze-btn" class="btn-analyze" disabled>

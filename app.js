@@ -4,9 +4,24 @@
  */
 
 // ========== 常數 ==========
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const STORAGE_KEY_API = 'foodlens_api_key';
+const STORAGE_KEY_MODEL = 'foodlens_model';
 const STORAGE_KEY_HISTORY = 'foodlens_history';
+const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
+const FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash-lite'];
+
+function getGeminiUrl(model) {
+    return `${GEMINI_API_BASE}/${model}:generateContent`;
+}
+
+function getModel() {
+    return localStorage.getItem(STORAGE_KEY_MODEL) || DEFAULT_MODEL;
+}
+
+function setModel(model) {
+    localStorage.setItem(STORAGE_KEY_MODEL, model);
+}
 
 const SYSTEM_PROMPT = `你是一個專業的營養師 AI，請分析使用者上傳的食物圖片。
 
@@ -42,6 +57,7 @@ const dom = {
     apiKeyInput: $('#api-key-input'),
     toggleKeyVis: $('#toggle-key-visibility'),
     saveApiKey: $('#save-api-key'),
+    modelSelect: $('#model-select'),
 
     dropZone: $('#drop-zone'),
     dropZoneContent: $('#drop-zone-content'),
@@ -96,6 +112,31 @@ function showToast(msg, type = 'error') {
     }, 3000);
 }
 
+function showErrorModal(title, message, details) {
+    const existing = document.querySelector('.error-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'error-overlay modal-overlay';
+    overlay.style.display = 'flex';
+    overlay.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>❌ ${title}</h2>
+                <button class="modal-close" onclick="this.closest('.error-overlay').remove()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="color:var(--text-primary);line-height:1.6;">${message}</p>
+                ${details ? `<details style="margin-top:12px;"><summary style="cursor:pointer;color:var(--text-muted);font-size:0.8rem;">詳細錯誤訊息</summary><pre style="margin-top:8px;padding:12px;background:var(--surface);border-radius:8px;font-size:0.75rem;color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;max-height:150px;overflow-y:auto;">${details}</pre></details>` : ''}
+            </div>
+        </div>
+    `;
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.remove();
+    });
+    document.body.appendChild(overlay);
+}
+
 function getApiKey() {
     return localStorage.getItem(STORAGE_KEY_API) || '';
 }
@@ -122,6 +163,33 @@ function getTodayKey() {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// 壓縮圖片到適當大小（降低 API token 消耗）
+function compressImage(imgEl, mimeType, maxDim = 800) {
+    return new Promise((resolve) => {
+        const onLoad = () => {
+            const canvas = document.createElement('canvas');
+            let w = imgEl.naturalWidth;
+            let h = imgEl.naturalHeight;
+            if (w > maxDim || h > maxDim) {
+                const ratio = Math.min(maxDim / w, maxDim / h);
+                w = Math.round(w * ratio);
+                h = Math.round(h * ratio);
+            }
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(imgEl, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL(mimeType === 'image/png' ? 'image/png' : 'image/jpeg', 0.8);
+            resolve(dataUrl.split(',')[1]);
+        };
+        if (imgEl.complete && imgEl.naturalWidth) {
+            onLoad();
+        } else {
+            imgEl.addEventListener('load', onLoad, { once: true });
+        }
+    });
+}
+
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -137,6 +205,7 @@ function fileToBase64(file) {
 // ========== 設定 Modal ==========
 function openSettingsModal() {
     dom.apiKeyInput.value = getApiKey();
+    if (dom.modelSelect) dom.modelSelect.value = getModel();
     dom.settingsModal.style.display = 'flex';
     dom.apiKeyInput.focus();
 }
@@ -165,6 +234,7 @@ dom.saveApiKey.addEventListener('click', () => {
         return;
     }
     setApiKey(key);
+    if (dom.modelSelect) setModel(dom.modelSelect.value);
     closeSettingsModal();
     showToast('API Key 已儲存 ✅', 'success');
 });
@@ -198,8 +268,8 @@ function handleFile(file) {
     dom.dropZoneContent.style.display = 'none';
     dom.analyzeBtn.disabled = false;
 
-    // 轉 base64
-    fileToBase64(file).then((b64) => {
+    // 壓縮圖片再轉 base64（降低 token 消耗）
+    compressImage(dom.previewImage, file.type).then((b64) => {
         currentImageBase64 = b64;
     });
 }
@@ -277,40 +347,88 @@ async function analyzeImage() {
     dom.analyzeBtn.disabled = true;
 
     try {
-        const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents: [
-                    {
-                        parts: [
-                            { text: SYSTEM_PROMPT },
-                            {
-                                inline_data: {
-                                    mime_type: currentImageMime,
-                                    data: currentImageBase64,
-                                },
+        const requestBody = JSON.stringify({
+            contents: [
+                {
+                    parts: [
+                        { text: SYSTEM_PROMPT },
+                        {
+                            inline_data: {
+                                mime_type: currentImageMime,
+                                data: currentImageBase64,
                             },
-                        ],
-                    },
-                ],
-                generationConfig: {
-                    temperature: 0.3,
-                    topP: 0.8,
-                    maxOutputTokens: 1024,
+                        },
+                    ],
                 },
-            }),
+            ],
+            generationConfig: {
+                temperature: 0.3,
+                topP: 0.8,
+                maxOutputTokens: 1024,
+            },
         });
 
-        if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            if (response.status === 400) {
-                throw new Error('API Key 無效或請求格式錯誤');
-            } else if (response.status === 429) {
-                throw new Error('API 呼叫次數超過限制，請稍後再試');
-            } else {
-                throw new Error(errData?.error?.message || `API 錯誤 (${response.status})`);
+        // 嘗試使用者選的模型，失敗則自動 fallback
+        const selectedModel = getModel();
+        const modelsToTry = [selectedModel, ...FALLBACK_MODELS.filter(m => m !== selectedModel)];
+        let response = null;
+        let lastError = null;
+
+        for (const model of modelsToTry) {
+            try {
+                response = await fetch(`${getGeminiUrl(model)}?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: requestBody,
+                });
+
+                if (response.ok) {
+                    if (model !== selectedModel) {
+                        showToast(`已自動切換至 ${model}`, 'info');
+                    }
+                    break;
+                }
+
+                const errData = await response.json().catch(() => ({}));
+                const errMsg = errData?.error?.message || '';
+                lastError = errMsg || `API 錯誤 (${response.status})`;
+
+                // 400 = key 無效，不用再試其他模型
+                if (response.status === 400) {
+                    throw { type: 'INVALID_KEY', message: errMsg };
+                }
+
+                // 403 = API 未啟用或權限問題
+                if (response.status === 403) {
+                    throw { type: 'FORBIDDEN', message: errMsg };
+                }
+
+                // 429 或 503 = 額度/服務問題，試下一個模型
+                if (response.status === 429 || response.status === 503) {
+                    // 偵測 limit: 0 的情況
+                    if (errMsg.includes('limit: 0')) {
+                        lastError = '__ZERO_QUOTA__:' + errMsg;
+                    }
+                    console.warn(`${model} 回傳 ${response.status}，嘗試下一個模型...`);
+                    response = null;
+                    continue;
+                }
+
+                // 其他錯誤直接丟出
+                throw { type: 'OTHER', message: lastError };
+            } catch (fetchErr) {
+                if (fetchErr.type === 'INVALID_KEY' || fetchErr.type === 'FORBIDDEN' || fetchErr.type === 'OTHER') throw fetchErr;
+                lastError = fetchErr.message || String(fetchErr);
+                response = null;
             }
+        }
+
+        if (!response || !response.ok) {
+            // 判斷是 limit:0 還是普通額度用完
+            if (lastError && lastError.startsWith('__ZERO_QUOTA__:')) {
+                throw { type: 'ZERO_QUOTA', message: lastError.replace('__ZERO_QUOTA__:', '') };
+            }
+            throw { type: 'QUOTA_EXCEEDED', message: lastError || '所有模型均無法使用' };
         }
 
         const data = await response.json();
@@ -331,10 +449,32 @@ async function analyzeImage() {
         addToHistory(result);
     } catch (err) {
         console.error('分析失敗:', err);
-        if (err instanceof SyntaxError) {
+
+        if (err?.type === 'ZERO_QUOTA') {
+            showErrorModal(
+                '免費額度為 0',
+                `你的 API Key 的免費額度限制為 0，這通常代表：<br><br>
+                <b>1.</b> API Key 需從 <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent);">AI Studio</a> 產生（不是 Google Cloud Console）<br>
+                <b>2.</b> 或需要在 <a href="https://console.cloud.google.com/billing" target="_blank" style="color:var(--accent);">Google Cloud</a> 啟用帳單（免費額度內不收費）<br>
+                <b>3.</b> 或你所在地區不支援免費層級<br><br>
+                <b>建議：</b>前往 AI Studio 重新產生一組新的 API Key 試試。`,
+                err.message
+            );
+        } else if (err?.type === 'QUOTA_EXCEEDED') {
+            showErrorModal(
+                'API 額度已耗盡',
+                `所有模型的免費額度均已用完，請等待額度重置（通常為每分鐘或每日重置）。<br><br>
+                <b>提示：</b>切換到 Gemini 2.0 Flash Lite 模型可獲得最大免費額度（每日 1500 次）。`,
+                err.message
+            );
+        } else if (err?.type === 'INVALID_KEY') {
+            showErrorModal('API Key 無效', '請確認你的 API Key 是否正確。前往設定重新輸入。', err.message);
+        } else if (err?.type === 'FORBIDDEN') {
+            showErrorModal('權限不足', '你的 API Key 沒有使用 Gemini API 的權限。請確認 Generative Language API 已啟用。', err.message);
+        } else if (err instanceof SyntaxError) {
             showToast('AI 回覆格式異常，請重試');
         } else {
-            showToast(err.message || '分析失敗，請重試');
+            showToast(err?.message || err?.toString() || '分析失敗，請重試');
         }
     } finally {
         isAnalyzing = false;
