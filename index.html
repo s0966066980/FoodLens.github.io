@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="FoodLens - 拍照即可辨識食物熱量，AI 驅動的智慧營養分析工具">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>FoodLens - 食物熱量辨識器</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>">
+</head>
+<body>
+    <!-- 設定 Modal -->
+    <div id="settings-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>⚙️ API 設定</h2>
+                <button id="close-settings" class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <label for="api-key-input">Google Gemini API Key</label>
+                <div class="api-key-wrapper">
+                    <input type="password" id="api-key-input" placeholder="輸入你的 API Key..." autocomplete="off">
+                    <button id="toggle-key-visibility" class="toggle-vis-btn" title="顯示/隱藏">👁️</button>
+                </div>
+                <p class="hint">
+                    前往 <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> 免費取得 API Key。
+                    <br>Key 僅儲存在你的瀏覽器中，不會上傳至任何伺服器。
+                </p>
+                <button id="save-api-key" class="btn-primary">💾 儲存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 主容器 -->
+    <div id="app">
+        <!-- Header -->
+        <header id="app-header">
+            <div class="header-left">
+                <span class="logo">🍽️</span>
+                <h1>FoodLens</h1>
+            </div>
+            <div class="header-right">
+                <button id="open-settings" class="icon-btn" title="設定">⚙️</button>
+            </div>
+        </header>
+
+        <!-- 主要內容 -->
+        <main id="main-content">
+            <!-- 上傳區 -->
+            <section id="upload-section">
+                <div id="drop-zone" class="drop-zone">
+                    <div class="drop-zone-content" id="drop-zone-content">
+                        <div class="camera-icon">📸</div>
+                        <p class="drop-text">拍照或上傳食物圖片</p>
+                        <p class="drop-hint">支援 JPG、PNG、WebP</p>
+                        <div class="upload-buttons">
+                            <label for="file-input" class="btn-upload">
+                                🖼️ 選擇圖片
+                            </label>
+                            <button id="camera-btn" class="btn-upload btn-camera">
+                                📷 拍照
+                            </button>
+                        </div>
+                    </div>
+                    <!-- 預覽 -->
+                    <div id="preview-container" class="preview-container" style="display:none;">
+                        <img id="preview-image" alt="食物預覽">
+                        <button id="remove-image" class="remove-btn" title="移除圖片">✕</button>
+                    </div>
+                    <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp" capture="environment" hidden>
+                    <input type="file" id="camera-input" accept="image/*" capture="environment" hidden>
+                </div>
+                <button id="analyze-btn" class="btn-analyze" disabled>
+                    <span class="btn-text">🔍 分析熱量</span>
+                    <span class="btn-loading" style="display:none;">
+                        <span class="spinner"></span> 分析中...
+                    </span>
+                </button>
+            </section>
+
+            <!-- 結果區 -->
+            <section id="result-section" style="display:none;">
+                <div class="result-card">
+                    <div class="result-header">
+                        <div class="result-title-row">
+                            <h2 id="food-name">—</h2>
+                            <span id="food-calories" class="calorie-badge">— kcal</span>
+                        </div>
+                        <p id="food-description" class="food-desc"></p>
+                    </div>
+
+                    <div class="macros-grid">
+                        <div class="macro-card protein">
+                            <span class="macro-label">蛋白質</span>
+                            <span class="macro-value" id="macro-protein">—</span>
+                            <div class="macro-bar"><div class="macro-fill" id="bar-protein"></div></div>
+                        </div>
+                        <div class="macro-card carbs">
+                            <span class="macro-label">碳水化合物</span>
+                            <span class="macro-value" id="macro-carbs">—</span>
+                            <div class="macro-bar"><div class="macro-fill" id="bar-carbs"></div></div>
+                        </div>
+                        <div class="macro-card fat">
+                            <span class="macro-label">脂肪</span>
+                            <span class="macro-value" id="macro-fat">—</span>
+                            <div class="macro-bar"><div class="macro-fill" id="bar-fat"></div></div>
+                        </div>
+                        <div class="macro-card fiber">
+                            <span class="macro-label">膳食纖維</span>
+                            <span class="macro-value" id="macro-fiber">—</span>
+                            <div class="macro-bar"><div class="macro-fill" id="bar-fiber"></div></div>
+                        </div>
+                    </div>
+
+                    <!-- 份量與備註 -->
+                    <div id="portion-info" class="portion-info"></div>
+                    <div id="food-note" class="food-note"></div>
+                </div>
+            </section>
+
+            <!-- 歷史紀錄 -->
+            <section id="history-section">
+                <div class="history-header">
+                    <h2>📋 今日紀錄</h2>
+                    <div class="history-actions">
+                        <span id="today-total" class="today-total">0 kcal</span>
+                        <button id="clear-history" class="btn-clear" title="清除紀錄">🗑️</button>
+                    </div>
+                </div>
+                <div id="history-list" class="history-list">
+                    <p class="empty-state">尚未有任何紀錄，拍張照片開始吧！</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
